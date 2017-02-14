@@ -10,7 +10,7 @@
 #    https://hub.docker.com/r/laradock/workspace/tags/
 #
 
-FROM laradock/workspace:1.1
+FROM laradock/workspace:1.3
 
 MAINTAINER Mahmoud Zalt <mahmoud@zalt.me>
 
@@ -32,65 +32,10 @@ MAINTAINER Mahmoud Zalt <mahmoud@zalt.me>
 #
 # Optional Software's will only be installed if you set them to `true`
 # in the `docker-compose.yml` before the build.
+# Example:
+#   - INSTALL_NODE=false
+#   - ...
 #
-#   - INSTALL_XDEBUG=           false
-#   - INSTALL_MONGO=            false
-#   - COMPOSER_GLOBAL_INSTALL=  false
-#   - INSTALL_NODE=             false
-#   - INSTALL_DRUSH=            false
-#
-
-#####################################
-# xDebug:
-#####################################
-
-# Check if xDebug needs to be installed
-ARG INSTALL_XDEBUG=true
-ENV INSTALL_XDEBUG ${INSTALL_XDEBUG}
-RUN if [ ${INSTALL_XDEBUG} = true ]; then \
-    # Load the xdebug extension only with phpunit commands
-    apt-get update && \
-    apt-get install -y --force-yes php7.0-xdebug && \
-    sed -i 's/^/;/g' /etc/php/7.0/cli/conf.d/20-xdebug.ini && \
-    echo "alias phpunit='php -dzend_extension=xdebug.so /var/www/laravel/vendor/bin/phpunit'" >> ~/.bashrc \
-;fi
-# ADD for REMOTE debugging
-COPY ./xdebug.ini /etc/php/7.0/cli/conf.d/xdebug.ini
-
-
-#####################################
-# ssh:
-#####################################
-
-# Check if ssh needs to be installed
-# See: https://github.com/phusion/baseimage-docker#enabling_ssh
-ADD insecure_id_rsa /tmp/id_rsa
-ADD insecure_id_rsa.pub /tmp/id_rsa.pub
-ARG INSTALL_WORKSPACE_SSH=true
-ENV INSTALL_WORKSPACE_SSH ${INSTALL_WORKSPACE_SSH}
-RUN if [ ${INSTALL_WORKSPACE_SSH} = true ]; then \
-    rm -f /etc/service/sshd/down && \
-    cat /tmp/id_rsa.pub >> /root/.ssh/authorized_keys \
-        && cat /tmp/id_rsa.pub >> /root/.ssh/id_rsa.pub \
-        && cat /tmp/id_rsa >> /root/.ssh/id_rsa \
-        && rm -f /tmp/id_rsa* \
-        && chmod 644 /root/.ssh/authorized_keys /root/.ssh/id_rsa.pub \
-    && chmod 400 /root/.ssh/id_rsa \
-;fi
-
-
-#####################################
-# MongoDB:
-#####################################
-
-# Check if Mongo needs to be installed
-ARG INSTALL_MONGO=true
-ENV INSTALL_MONGO ${INSTALL_MONGO}
-RUN if [ ${INSTALL_MONGO} = true ]; then \
-    # Install the mongodb extension
-    pecl install mongodb && \
-    echo "extension=mongodb.so" >> /etc/php/7.0/cli/php.ini \
-;fi
 
 #####################################
 # Non-Root User:
@@ -101,6 +46,31 @@ ARG PUID=1000
 ARG PGID=1000
 RUN groupadd -g $PGID laradock && \
     useradd -u $PUID -g laradock -m laradock
+
+
+#####################################
+# SOAP:
+#####################################
+USER root
+
+ARG INSTALL_SOAP=false
+ENV INSTALL_SOAP ${INSTALL_SOAP}
+
+RUN if [ ${INSTALL_SOAP} = true ]; then \
+  # Install the PHP SOAP extension
+  apt-get -y update && \
+  add-apt-repository -y ppa:ondrej/php && \
+  apt-get -y install libxml2-dev php7.0-soap && \
+  echo "extension=soap.so" >> /etc/php/7.0/cli/conf.d/40-soap.ini \
+;fi
+
+#####################################
+# Set Timezone
+#####################################
+
+ARG TZ=UTC
+ENV TZ ${TZ}
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 #####################################
 # Composer:
@@ -114,11 +84,87 @@ RUN chown -R laradock:laradock /home/laradock/.composer
 USER laradock
 
 # Check if global install need to be ran
-ARG COMPOSER_GLOBAL_INSTALL=true
+ARG COMPOSER_GLOBAL_INSTALL=false
 ENV COMPOSER_GLOBAL_INSTALL ${COMPOSER_GLOBAL_INSTALL}
 RUN if [ ${COMPOSER_GLOBAL_INSTALL} = true ]; then \
     # run the install
     composer global install \
+;fi
+
+# Export composer vendor path
+RUN echo "" >> ~/.bashrc && \
+echo 'export PATH="~/.composer/vendor/bin:$PATH"' >> ~/.bashrc
+
+#####################################
+# Crontab
+#####################################
+USER root
+
+COPY ./crontab /etc/cron.d
+RUN chmod -R 644 /etc/cron.d
+
+#####################################
+# User Aliases
+#####################################
+
+USER laradock
+COPY ./aliases.sh /home/laradock/aliases.sh
+RUN echo "" >> ~/.bashrc && \
+    echo "# Load Custom Aliases" >> ~/.bashrc && \
+    echo "source /home/laradock/aliases.sh" >> ~/.bashrc && \
+    echo "" >> ~/.bashrc
+    
+USER root
+RUN echo "" >> ~/.bashrc && \
+    echo "# Load Custom Aliases" >> ~/.bashrc && \
+    echo "source /home/laradock/aliases.sh" >> ~/.bashrc && \
+    echo "" >> ~/.bashrc
+
+#####################################
+# xDebug:
+#####################################
+
+ARG INSTALL_XDEBUG=false
+RUN if [ ${INSTALL_XDEBUG} = true ]; then \
+    # Load the xdebug extension only with phpunit commands
+    apt-get update && \
+    apt-get install -y --force-yes php7.0-xdebug && \
+    sed -i 's/^/;/g' /etc/php/7.0/cli/conf.d/20-xdebug.ini && \
+    echo "alias phpunit='php -dzend_extension=xdebug.so /var/www/vendor/bin/phpunit'" >> ~/.bashrc \
+;fi
+# ADD for REMOTE debugging
+COPY ./xdebug.ini /etc/php/7.0/cli/conf.d/xdebug.ini
+
+#####################################
+# ssh:
+#####################################
+ARG INSTALL_WORKSPACE_SSH=false
+ENV INSTALL_WORKSPACE_SSH ${INSTALL_WORKSPACE_SSH}
+
+ADD insecure_id_rsa /tmp/id_rsa
+ADD insecure_id_rsa.pub /tmp/id_rsa.pub
+
+RUN if [ ${INSTALL_WORKSPACE_SSH} = true ]; then \
+    rm -f /etc/service/sshd/down && \
+    cat /tmp/id_rsa.pub >> /root/.ssh/authorized_keys \
+        && cat /tmp/id_rsa.pub >> /root/.ssh/id_rsa.pub \
+        && cat /tmp/id_rsa >> /root/.ssh/id_rsa \
+        && rm -f /tmp/id_rsa* \
+        && chmod 644 /root/.ssh/authorized_keys /root/.ssh/id_rsa.pub \
+    && chmod 400 /root/.ssh/id_rsa \
+;fi
+
+#####################################
+# MongoDB:
+#####################################
+
+# Check if Mongo needs to be installed
+ARG INSTALL_MONGO=false
+ENV INSTALL_MONGO ${INSTALL_MONGO}
+RUN if [ ${INSTALL_MONGO} = true ]; then \
+    # Install the mongodb extension
+    pecl install mongodb && \
+    echo "extension=mongodb.so" >> /etc/php/7.0/cli/conf.d/30-mongodb.ini \
 ;fi
 
 #####################################
@@ -126,7 +172,7 @@ RUN if [ ${COMPOSER_GLOBAL_INSTALL} = true ]; then \
 #####################################
 USER root
 ENV DRUSH_VERSION 8.1.2
-ARG INSTALL_DRUSH=true
+ARG INSTALL_DRUSH=false
 ENV INSTALL_DRUSH ${INSTALL_DRUSH}
 RUN if [ ${INSTALL_DRUSH} = true ]; then \
     # Install Drush 8 with the phar file.
@@ -144,13 +190,13 @@ USER laradock
 # Check if NVM needs to be installed
 ARG NODE_VERSION=stable
 ENV NODE_VERSION ${NODE_VERSION}
-ARG INSTALL_NODE=true
+ARG INSTALL_NODE=false
 ENV INSTALL_NODE ${INSTALL_NODE}
 ENV NVM_DIR /home/laradock/.nvm
 RUN if [ ${INSTALL_NODE} = true ]; then \
     # Install nvm (A Node Version Manager)
     curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.31.6/install.sh | bash && \
-        . ~/.nvm/nvm.sh && \
+        . $NVM_DIR/nvm.sh && \
         nvm install ${NODE_VERSION} && \
         nvm use ${NODE_VERSION} && \
         nvm alias ${NODE_VERSION} && \
@@ -165,14 +211,57 @@ RUN if [ ${INSTALL_NODE} = true ]; then \
     echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> ~/.bashrc \
 ;fi
 
+# Add NVM binaries to root's .bashrc
+USER root
+
+RUN if [ ${INSTALL_NODE} = true ]; then \
+    echo "" >> ~/.bashrc && \
+    echo 'export NVM_DIR="/home/laradock/.nvm"' >> ~/.bashrc && \
+    echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> ~/.bashrc \
+;fi
+
+#####################################
+# YARN:
+#####################################
+
+USER laradock
+
+ARG INSTALL_YARN=false
+ENV INSTALL_YARN ${INSTALL_YARN}
+ARG YARN_VERSION=latest
+ENV YARN_VERSION ${YARN_VERSION}
+
+RUN if [ ${INSTALL_YARN} = true ]; then \
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && \
+    if [ ${YARN_VERSION} = "latest" ]; then \
+        curl -o- -L https://yarnpkg.com/install.sh | bash; \
+    else \
+        curl -o- -L https://yarnpkg.com/install.sh | bash -s -- --version ${YARN_VERSION}; \
+    fi && \
+    echo "" >> ~/.bashrc && \
+    echo 'export PATH="$HOME/.yarn/bin:$PATH"' >> ~/.bashrc \
+;fi
+
+# Add YARN binaries to root's .bashrc
+USER root
+
+RUN if [ ${INSTALL_YARN} = true ]; then \
+    echo "" >> ~/.bashrc && \
+    echo 'export YARN_DIR="/home/laradock/.yarn"' >> ~/.bashrc && \
+    echo 'export PATH="$YARN_DIR/bin:$PATH"' >> ~/.bashrc \
+;fi
+
 #####################################
 # PHP Aerospike:
 #####################################
 USER root
+
 ARG INSTALL_AEROSPIKE_EXTENSION=true
 ENV INSTALL_AEROSPIKE_EXTENSION ${INSTALL_AEROSPIKE_EXTENSION}
+
 # Copy aerospike configration for remote debugging
 COPY ./aerospike.ini /etc/php/7.0/cli/conf.d/aerospike.ini
+
 RUN if [ ${INSTALL_AEROSPIKE_EXTENSION} = true ]; then \
     # Install the php aerospike extension
     curl -L -o /tmp/aerospike-client-php.tar.gz "https://github.com/luciano-jr/aerospike-client-php/archive/master.tar.gz" \
@@ -187,6 +276,104 @@ RUN if [ ${INSTALL_AEROSPIKE_EXTENSION} = true ]; then \
     && rm /tmp/aerospike-client-php.tar.gz \
 ;fi
 
+RUN if [ ${INSTALL_AEROSPIKE_EXTENSION} = false ]; then \
+    rm /etc/php/7.0/cli/conf.d/aerospike.ini \
+;fi
+
+#####################################
+# PHP V8JS:
+#####################################
+USER root
+
+ARG INSTALL_V8JS_EXTENSION=false
+ENV INSTALL_V8JS_EXTENSION ${INSTALL_V8JS_EXTENSION}
+
+RUN if [ ${INSTALL_V8JS_EXTENSION} = true ]; then \
+    # Install the php V8JS extension
+    add-apt-repository -y ppa:pinepain/libv8-5.4 \
+    && apt-get update \
+    && apt-get install -y php-dev php-pear libv8-5.4 \
+    && pecl install v8js \
+    && echo "extension=v8js.so" >> /etc/php/7.0/cli/php.ini \
+;fi
+
+#####################################
+# Non-root user : PHPUnit path
+#####################################
+
+# add ./vendor/bin to non-root user's bashrc (needed for phpunit)
+USER laradock
+
+RUN echo "" >> ~/.bashrc && \
+    echo 'export PATH="/var/www/vendor/bin:$PATH"' >> ~/.bashrc
+
+#####################################
+# Laravel Artisan Alias
+#####################################
+USER root
+
+RUN echo "" >> ~/.bashrc && \
+    echo 'alias art="php artisan"' >> ~/.bashrc
+
+#####################################
+# Laravel Envoy:
+#####################################
+USER laradock
+
+ARG INSTALL_LARAVEL_ENVOY=true
+ENV INSTALL_LARAVEL_ENVOY ${INSTALL_LARAVEL_ENVOY}
+
+RUN if [ ${INSTALL_LARAVEL_ENVOY} = true ]; then \
+    # Install the Laravel Envoy
+    composer global require "laravel/envoy=~1.0" \
+;fi
+
+#####################################
+# Deployer:
+#####################################
+USER laradock
+
+ARG INSTALL_DEPLOYER=false
+ENV INSTALL_DEPLOYER ${INSTALL_DEPLOYER}
+
+RUN if [ ${INSTALL_DEPLOYER} = true ]; then \
+    # Install the Deployer
+    composer global require "deployer/deployer" \
+;fi
+
+#####################################
+# Linuxbrew:
+#####################################
+USER root
+
+ARG INSTALL_LINUXBREW=true
+ENV INSTALL_LINUXBREW ${INSTALL_LINUXBREW}
+
+RUN if [ ${INSTALL_LINUXBREW} = true ]; then \
+
+    # Preparation
+    apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y build-essential make cmake scons curl git \
+      ruby autoconf automake autoconf-archive \
+      gettext libtool flex bison \
+      libbz2-dev libcurl4-openssl-dev \
+      libexpat-dev libncurses-dev && \
+
+    # Install the Linuxbrew
+    git clone https://github.com/Homebrew/linuxbrew.git ~/.linuxbrew && \
+
+    echo "" >> ~/.bashrc && \
+    echo 'export PKG_CONFIG_PATH"=/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH"' >> ~/.bashrc && \
+
+    # Setup linuxbrew
+    echo 'export LINUXBREWHOME="$HOME/.linuxbrew"' >> ~/.bashrc && \
+    echo 'export PATH="$LINUXBREWHOME/bin:$PATH"' >> ~/.bashrc && \
+    echo 'export MANPATH="$LINUXBREWHOME/man:$MANPATH"' >> ~/.bashrc && \
+    echo 'export PKG_CONFIG_PATH="$LINUXBREWHOME/lib64/pkgconfig:$LINUXBREWHOME/lib/pkgconfig:$PKG_CONFIG_PATH"' >> ~/.bashrc && \
+    echo 'export LD_LIBRARY_PATH="$LINUXBREWHOME/lib64:$LINUXBREWHOME/lib:$LD_LIBRARY_PATH"' >> ~/.bashrc \
+;fi
+
 #
 #--------------------------------------------------------------------------
 # Final Touch
@@ -199,4 +386,4 @@ RUN apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Set default work directory
-WORKDIR /var/www/laravel
+WORKDIR /var/www

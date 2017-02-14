@@ -34,17 +34,41 @@ MAINTAINER Mahmoud Zalt <mahmoud@zalt.me>
 # in the `docker-compose.yml` before the build.
 # Example:
 #   - INSTALL_ZIP_ARCHIVE=true
+#   - ...
 #
+
+#####################################
+# SOAP:
+#####################################
+
+ARG INSTALL_SOAP=false
+RUN if [ ${INSTALL_SOAP} = true ]; then \
+    # Install the soap extension
+    apt-get -y update && \
+    apt-get -y install libxml2-dev php-soap && \ 
+    docker-php-ext-install soap \
+;fi
 
 #####################################
 # xDebug:
 #####################################
 
-ARG INSTALL_XDEBUG=true
+ARG INSTALL_XDEBUG=false
 RUN if [ ${INSTALL_XDEBUG} = true ]; then \
     # Install the xdebug extension
     pecl install xdebug && \
     docker-php-ext-enable xdebug \
+;fi
+
+#####################################
+# PHP REDIS EXTENSION FOR PHP 7.0
+#####################################
+ARG INSTALL_PHPREDIS=false
+RUN if [ ${INSTALL_PHPREDIS} = true ]; then \
+    # Install Php Redis Extension
+    pecl install -o -f redis \
+    &&  rm -rf /tmp/pear \
+    &&  docker-php-ext-enable redis \
 ;fi
 
 # Copy xdebug configration for remote debugging
@@ -54,7 +78,7 @@ COPY ./xdebug.ini /usr/local/etc/php/conf.d/xdebug.ini
 # MongoDB:
 #####################################
 
-ARG INSTALL_MONGO=true
+ARG INSTALL_MONGO=false
 RUN if [ ${INSTALL_MONGO} = true ]; then \
     # Install the mongodb extension
     pecl install mongodb && \
@@ -65,7 +89,7 @@ RUN if [ ${INSTALL_MONGO} = true ]; then \
 # ZipArchive:
 #####################################
 
-ARG INSTALL_ZIP_ARCHIVE=true
+ARG INSTALL_ZIP_ARCHIVE=false
 RUN if [ ${INSTALL_ZIP_ARCHIVE} = true ]; then \
     # Install the zip extension
     pecl install zip && \
@@ -73,10 +97,20 @@ RUN if [ ${INSTALL_ZIP_ARCHIVE} = true ]; then \
 ;fi
 
 #####################################
+# bcmath:
+#####################################
+
+ARG INSTALL_BCMATH=false
+RUN if [ ${INSTALL_BCMATH} = true ]; then \
+    # Install the bcmath extension
+    docker-php-ext-install bcmath \
+;fi
+
+#####################################
 # PHP Memcached:
 #####################################
 
-ARG INSTALL_MEMCACHED=true
+ARG INSTALL_MEMCACHED=false
 RUN if [ ${INSTALL_MEMCACHED} = true ]; then \
     # Install the php memcached extension
     curl -L -o /tmp/memcached.tar.gz "https://github.com/php-memcached-dev/php-memcached/archive/php7.tar.gz" \
@@ -95,10 +129,22 @@ RUN if [ ${INSTALL_MEMCACHED} = true ]; then \
 ;fi
 
 #####################################
+# Exif:
+#####################################
+
+ARG INSTALL_EXIF=false
+RUN if [ ${INSTALL_EXIF} = true ]; then \
+    # Enable Exif PHP extentions requirements
+    docker-php-ext-install exif && \
+    docker-php-ext-enable exif \
+;fi
+
+
+#####################################
 # PHP Aerospike:
 #####################################
 
-ARG INSTALL_AEROSPIKE_EXTENSION=true
+ARG INSTALL_AEROSPIKE_EXTENSION=false
 ENV INSTALL_AEROSPIKE_EXTENSION ${INSTALL_AEROSPIKE_EXTENSION}
 # Copy aerospike configration for remote debugging
 COPY ./aerospike.ini /usr/local/etc/php/conf.d/aerospike.ini
@@ -119,13 +165,25 @@ RUN if [ ${INSTALL_AEROSPIKE_EXTENSION} = true ]; then \
 #####################################
 # Opcache:
 #####################################
-ARG INSTALL_OPCACHE=true
+ARG INSTALL_OPCACHE=false
 RUN if [ ${INSTALL_OPCACHE} = true ]; then \
     docker-php-ext-install opcache && \
     docker-php-ext-enable opcache \
 ;fi
 
+# Copy opcache configration
+COPY ./opcache.ini /usr/local/etc/php/conf.d/opcache.ini
 
+#####################################
+# Codeigniter Modifications:
+#####################################
+
+ARG CODEIGNITER=false
+RUN if [ ${CODEIGNITER} = true ]; then \
+    # Install Codeigniter PHP extentions requirements
+     docker-php-ext-install mysqli && \
+     docker-php-ext-install tokenizer \
+;fi
 
 #
 #--------------------------------------------------------------------------
@@ -140,7 +198,7 @@ RUN rm -r /var/lib/apt/lists/*
 
 RUN usermod -u 1000 www-data
 
-WORKDIR /var/www/laravel
+WORKDIR /var/www
 
 CMD ["php-fpm"]
 
